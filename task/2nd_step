@@ -1,0 +1,244 @@
+from pdfixsdk import *
+
+# === CONFIGURATION ===
+pdf_path = r"c:\Users\is6076\Downloads\full_merge_2025_links_fixed.pdf"
+output_path = r"c:\Users\is6076\Downloads\output_with_links.pdf"
+
+# Mapping of search text to target page number
+chapter_links = {
+    "(Chapter 1)": 10,
+    "Chapter 1":10,
+    "(Chapter 2)": 35,
+    "Chapter 2":35,
+    "(Chapter 3)": 58,
+    "Chapter 3":58
+}
+
+
+def search_text_in_page(page, search_text):
+    """
+    Search for specific text in a page and return precise bounding boxes
+    for only the matched substring, not the entire line.
+    """
+    text_rects = []
+    try:
+        content = page.GetContent()
+        if content is None:
+            return text_rects
+
+        num_objects = content.GetNumObjects()
+        for i in range(num_objects):
+            obj = content.GetObject(i)
+            if obj is None:
+                continue
+
+            if obj.GetObjectType() == kPdsPageText:
+                text_obj = PdsText(obj.obj)
+                full_text = text_obj.GetText()
+
+                # Case-insensitive substring search
+                start_index = 0
+                while True:
+                    idx = full_text.lower().find(search_text.lower(), start_index)
+                    if idx == -1:
+                        break
+
+                    match_start = idx
+                    match_end = idx + len(search_text)
+                    merged_rect = None
+
+                    for char_idx in range(match_start, match_end):
+                        char_bbox = text_obj.GetCharBBox(char_idx)
+                        if char_bbox is not None:
+                            if merged_rect is None:
+                                merged_rect = PdfRect()
+                                merged_rect.left = char_bbox.left
+                                merged_rect.right = char_bbox.right
+                                merged_rect.top = char_bbox.top
+                                merged_rect.bottom = char_bbox.bottom
+                            else:
+                                merged_rect.left = min(merged_rect.left, char_bbox.left)
+                                merged_rect.bottom = min(merged_rect.bottom, char_bbox.bottom)
+                                merged_rect.right = max(merged_rect.right, char_bbox.right)
+                                merged_rect.top = max(merged_rect.top, char_bbox.top)
+
+                    if merged_rect is not None:
+                        text_rects.append(merged_rect)
+
+                    start_index = match_end
+
+        return text_rects
+
+    except Exception as e:
+        print(f"⚠️ Error searching text: {str(e)}")
+        return text_rects
+
+
+def add_link_to_page(page, doc, rect, target_page):
+    """
+    Add a clickable link annotation with no visible border or highlight.
+    """
+    try:
+        link_annot = page.CreateAnnot(kAnnotLink, rect)
+        if link_annot is None:
+            return False
+
+        # Create view destination
+        dest_rect = PdfRect()
+        view_dest = doc.CreateViewDestination(target_page, kPdfZoomFitPage, dest_rect, 1.0)
+        if view_dest is None:
+            return False
+
+        action = doc.GetActionFromViewDest(view_dest)
+        if action is None:
+            return False
+
+        link_annot_obj = PdfLinkAnnot(link_annot.obj)
+        if not link_annot_obj.SetAction(action):
+            return False
+
+        # ✅ Make the link invisible
+        annot_obj = link_annot.GetObject()
+
+        # Remove border (Border [0 0 0])
+        border_array = doc.CreateArrayObject(True)
+        border_array.PutNumber(0, 0)
+        border_array.PutNumber(1, 0)
+        border_array.PutNumber(2, 0)
+        annot_obj.Put("Border", border_array)
+
+        # Remove color (C [])
+        color_array = doc.CreateArrayObject(True)
+        annot_obj.Put("C", color_array)
+
+        # ✅ No highlight mode (final fix — use PutName instead of CreateNameObject)
+        annot_obj.PutName("H", "N")
+
+        # Optional: make it printable
+        link_annot.SetFlags(kAnnotFlagPrint)
+
+        # Add annotation to the page
+        if not page.AddAnnot(-1, link_annot):
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"⚠️ Error adding link: {str(e)}")
+        return False
+
+
+
+def main():
+    """
+    Main function to add chapter links to PDF
+    """
+    pdfix = GetPdfix()
+    if pdfix is None:
+        print("❌ PDFix initialization failed")
+        return False
+
+    try:
+        # === OPEN PDF ===
+        doc = pdfix.OpenDoc(pdf_path, "")
+        if doc is None:
+            print(f"❌ Unable to open document: {pdfix.GetError()}")
+            return False
+
+        total_pages = doc.GetNumPages()
+        print(f"📄 Opened PDF with {total_pages} pages")
+        print("=" * 70)
+
+        # === LOOP OVER ALL CHAPTERS ===
+        for chapter_text, target_page in chapter_links.items():
+            print(f"\n🔍 Searching for '{chapter_text}'...")
+
+            found_page = None
+            text_rects = []
+
+            for page_num in range(total_pages):
+                print(f"   Scanning page {page_num + 1}/{total_pages}...", end="\r")
+                page = doc.AcquirePage(page_num)
+                if page is None:
+                    continue
+
+                rects = search_text_in_page(page, chapter_text)
+
+                if rects:
+                    found_page = page_num
+                    text_rects = rects
+                    page.Release()
+                    print(f"   ✅ Found '{chapter_text}' on page {found_page + 1}" + " " * 20)
+                    break
+
+                page.Release()
+
+            if found_page is None:
+                print(f"   ❌ '{chapter_text}' not found in the PDF.")
+                continue
+
+            if not text_rects:
+                print(f"   ⚠️ '{chapter_text}' found but no bounding box detected.")
+                continue
+
+            # Add link for each occurrence of the text
+            page = doc.AcquirePage(found_page)
+            if page is None:
+                print(f"   ❌ Failed to acquire page {found_page + 1}")
+                continue
+
+            links_added = 0
+            for rect in text_rects:
+                target_page_index = target_page - 1
+                if target_page_index >= total_pages or target_page_index < 0:
+                    print(f"   ⚠️ Target page {target_page} doesn't exist (PDF has {total_pages} pages)")
+                    continue
+
+                if add_link_to_page(page, doc, rect, target_page_index):
+                    links_added += 1
+
+            page.Release()
+
+            if links_added > 0:
+                print(f"   🔗 {links_added} link(s) added for '{chapter_text}' → page {target_page}")
+            else:
+                print(f"   ❌ Failed to add links for '{chapter_text}'")
+
+        # === SAVE UPDATED PDF ===
+        print("\n" + "=" * 70)
+        print("💾 Saving PDF...")
+
+        if not doc.Save(output_path, kSaveFull):
+            print(f"❌ Failed to save document: {pdfix.GetError()}")
+            doc.Close()
+            return False
+
+        print(f"✅ PDF saved successfully!")
+        print(f"📄 Output: {output_path}")
+
+        doc.Close()
+        print("\n" + "=" * 70)
+        print("🎉 All links added successfully!")
+        print("=" * 70)
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# === RUN THE SCRIPT ===
+if __name__ == "__main__":
+    print("=" * 70)
+    print("PDF CHAPTER LINK CREATOR (PDFix SDK)")
+    print("=" * 70)
+
+    success = main()
+
+    if success:
+        print("\n✅ Process completed successfully!")
+    else:
+        print("\n❌ Process failed. Check errors above.")
