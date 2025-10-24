@@ -1,0 +1,69 @@
+from pdfixsdk import *
+import uuid
+import re
+
+pdfix = GetPdfix()
+
+
+def starts_with_number(text):
+    return bool(re.match(r"^\d+\.(\d+\.(\d+\.)?)?\s+(.*)", text))
+
+
+def process_struct_elem(elem: PdsStructElement):
+    # Check if current tag is <P>
+    if elem.GetType(False) == "P":
+        num_children = elem.GetNumChildren()
+        for i in range(num_children):
+            if elem.GetChildType(i) != kPdsStructChildElement:
+                continue
+
+            obj = elem.GetChildObject(i)
+            child_elem = elem.GetStructTree().GetStructElementFromObject(obj)
+            if not child_elem:
+                continue
+
+            # ✅ Check if this is a Link and next child is Note
+            if child_elem.GetType(False) == "Link" and i + 1 < num_children:
+                if elem.GetChildType(i + 1) == kPdsStructChildElement:
+                    next_obj = elem.GetChildObject(i + 1)
+                    next_elem = elem.GetStructTree().GetStructElementFromObject(next_obj)
+                    if next_elem and next_elem.GetType(False) == "Note":
+                        print(f"✅ Found <Link> followed by <Note> inside <P> at index {i}")
+
+                        # 1️⃣ Insert Reference before Link
+                        reference_elem = elem.AddNewChild("Reference", i)
+
+                        # 2️⃣ Move Link into Reference
+                        elem.MoveChild(i + 1, reference_elem, -1)
+
+                        print(f"🪄 Inserted Reference and moved Link inside it")
+                        break  # optional, if only one transformation per <P> is needed
+
+    # 🔁 Recursively process children
+    for i in range(elem.GetNumChildren()):
+        if elem.GetChildType(i) == kPdsStructChildElement:
+            obj = elem.GetChildObject(i)
+            child_elem = elem.GetStructTree().GetStructElementFromObject(obj)
+            if child_elem:
+                process_struct_elem(child_elem)
+
+
+def modify_pdf_tags(input_path, output_path):
+    doc = pdfix.OpenDoc(input_path, "")
+    if doc is None:
+        raise Exception("Failed to open PDF")
+    # print("COme")
+    struct_tree = doc.GetStructTree()
+    for i in range(struct_tree.GetNumChildren()):
+        obj = struct_tree.GetChildObject(i)
+        elem = struct_tree.GetStructElementFromObject(obj)
+        if elem:
+            process_struct_elem(elem)
+
+    if not doc.Save(output_path, kSaveFull):
+        raise Exception("Failed to save PDF")
+    final_output = r"final_output.pdf"
+    print(f"PDF modified and saved to: {output_path}")
+
+
+modify_pdf_tags(r"C:\Users\IS12765\Downloads\New folder\karthi\cleaned_tags.pdf", r"C:\Users\IS12765\Downloads\New folder\karthi\cleaned_tag13333e4rs.pdf")
