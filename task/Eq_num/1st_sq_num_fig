@@ -1,0 +1,67 @@
+from pdfixsdk import *
+
+pdfix = GetPdfix()
+
+def move_number_into_figure(elem: PdsStructElement):
+    # Check if this element is Eq_num
+    if elem.GetType(False) == "Eq_num":
+        figure_elem = None
+        figure_index = -1
+        number_index = -1
+
+        # 1️⃣ Find Figure and the index of number element (whatever it is)
+        for i in range(elem.GetNumChildren()):
+            ctype = elem.GetChildType(i)
+            if ctype != kPdsStructChildElement:
+                # This might be a text/MCID content or simple content node
+                number_index = i
+                continue
+
+            cobj = elem.GetChildObject(i)
+            child_elem = elem.GetStructTree().GetStructElementFromObject(cobj)
+            if not child_elem:
+                continue
+
+            if child_elem.GetType(False) == "Figure":
+                figure_elem = child_elem
+                figure_index = i
+
+        # 2️⃣ If number_index exists and Figure found
+        if figure_elem is not None and number_index != -1:
+            # Move (1) into Figure
+            elem.MoveChild(number_index, figure_elem, -1)
+            print("✅ Moved (1) inside Figure")
+
+    # 3️⃣ Recurse into children
+    for i in range(elem.GetNumChildren()):
+        if elem.GetChildType(i) == kPdsStructChildElement:
+            cobj = elem.GetChildObject(i)
+            child_elem = elem.GetStructTree().GetStructElementFromObject(cobj)
+            if child_elem:
+                move_number_into_figure(child_elem)
+
+
+def modify_pdf_tags(input_path, output_path):
+    doc = pdfix.OpenDoc(input_path, "")
+    if not doc:
+        raise Exception("❌ Failed to open PDF")
+
+    struct_tree = doc.GetStructTree()
+    for i in range(struct_tree.GetNumChildren()):
+        obj = struct_tree.GetChildObject(i)
+        elem = struct_tree.GetStructElementFromObject(obj)
+        if elem:
+            move_number_into_figure(elem)
+
+    if not doc.Save(output_path, kSaveFull):
+        raise Exception(f"❌ Failed to save PDF: {pdfix.GetError()}")
+
+    doc.Close()
+    print(f"✅ (1) moved inside Figure. Saved to: {output_path}")
+
+
+# 🧪 Example usage
+modify_pdf_tags(
+    r"C:\Users\IS12765\Downloads\mo9.pdf",
+    r"C:\Users\IS12765\Downloads\output_equation_fixed.pdf"
+)
