@@ -823,7 +823,83 @@ class Table:
                     self.step20_move_table_out_of_figure(child_elem, fresh_elem)
 
 
+    def step21_move_figure_into_table(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        """
+        Step 21️⃣ — Move <_Figure_> into <Table> under <Story>.
+        """
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
 
+        # ✅ Process only <Story> tags
+        if fresh_elem.GetType(False) == "Story":
+            figure_elem = None
+            table_elem = None
+
+            # Find both <_Figure_> and <Table> inside <Story>
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) != kPdsStructChildElement:
+                    continue
+                obj = fresh_elem.GetChildObject(i)
+                child = st.GetStructElementFromObject(obj)
+                if not child:
+                    continue
+
+                tag_type = child.GetType(False)
+                if tag_type == "_Figure_":
+                    figure_elem = child
+                elif tag_type == "Table":
+                    table_elem = child
+
+            # ✅ Move <_Figure_> into <Table> (if both exist)
+            if figure_elem and table_elem:
+                print("🧩 Found <Story> with <_Figure_> and <Table> — moving <_Figure_> inside <Table>")
+
+                # Find <_Figure_> index in <Story>
+                figure_obj = figure_elem.GetObject()
+                for idx in range(fresh_elem.GetNumChildren()):
+                    if fresh_elem.GetChildType(idx) != kPdsStructChildElement:
+                        continue
+                    obj = fresh_elem.GetChildObject(idx)
+                    if obj.obj == figure_obj.obj:
+                        # ✅ Move it to the beginning of <Table>
+                        fresh_elem.MoveChild(idx, table_elem, 0)
+                        print("✅ <_Figure_> moved into <Table>")
+                        break
+
+        # ✅ Recurse through structure tree
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step21_move_figure_into_table(child_elem, fresh_elem)
+
+
+
+    def step22_change_Figure_to_Caption(self, elem: PdsStructElement):
+        st = elem.GetStructTree()
+        elem = st.GetStructElementFromObject(elem.GetObject())
+        if not elem:
+            return
+
+        if elem.GetType(False) == "Table":
+            for i in range(elem.GetNumChildren()):
+                if elem.GetChildType(i) == kPdsStructChildElement:
+                    obj = elem.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child and child.GetType(False) == "_Figure_":
+                        print("🧩 <_Figure_> → <Sect>")
+                        child.SetType("Caption")
+
+                    if child and child.GetType(False) == "T_credit":
+                        print("🧩 <T_credit> → <T_credit>")
+                        child.SetType("TFoot")
+
+        for i in range(elem.GetNumChildren()):
+            if elem.GetChildType(i) == kPdsStructChildElement:
+                self.step22_change_Figure_to_Caption(st.GetStructElementFromObject(elem.GetChildObject(i)))
     # def step17_split_multiple_lbody_in_li(self, elem: PdsStructElement):
     #     pass
     def modify_pdf_tags(self, input_path, output_path):
@@ -840,7 +916,9 @@ class Table:
                 self.step18_fix_table_structure(elem)
                 self.step19_move_tcredit_under_table(elem)
                 self.step20_move_table_out_of_figure(elem)
-                # self.step17_split_multiple_lbody_in_li(elem)
+                self.step21_move_figure_into_table(elem)
+                self.step22_change_Figure_to_Caption(elem)
+
 
         if not doc.Save(output_path, kSaveFull):
             raise Exception(f"❌ Failed to save: {self.pdfix.GetError()}")
