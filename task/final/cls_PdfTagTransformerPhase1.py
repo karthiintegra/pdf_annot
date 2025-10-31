@@ -623,8 +623,8 @@ class Table:
     def __init__(self, pdfix):
         self.pdfix = pdfix
 
-    def step18_fix_table_structure(self, elem: PdsStructElement):
-        """Detect <Table> tags and restructure TRs into <THead> and <TBody>."""
+    def step18_fix_table_structure(self,elem: PdsStructElement):
+        """Detect <Table> tags and split TRs into <THead> and <TBody>."""
         st = elem.GetStructTree()
         fresh_elem = st.GetStructElementFromObject(elem.GetObject())
         if not fresh_elem:
@@ -634,18 +634,18 @@ class Table:
         if fresh_elem.GetType(False) == "Table":
             print("📊 Found <Table> — restructuring TRs into <THead> and <TBody>")
 
-            tr_indices = []
+            # Collect <TR> references
+            tr_elems = []
             for i in range(fresh_elem.GetNumChildren()):
                 if fresh_elem.GetChildType(i) == kPdsStructChildElement:
                     obj = fresh_elem.GetChildObject(i)
                     child = st.GetStructElementFromObject(obj)
                     if child and child.GetType(False) == "TR":
-                        tr_indices.append(i)
+                        tr_elems.append(child)
 
-            # ✅ Only proceed if multiple TR tags exist
-            if len(tr_indices) > 1:
-                # Create <THead> and <TBody> under <Table>
-                thead = fresh_elem.AddNewChild("THead", 0)
+            if len(tr_elems) > 1:
+                # ✅ Create <THead> and <TBody> at the end
+                thead = fresh_elem.AddNewChild("THead", -1)
                 tbody = fresh_elem.AddNewChild("TBody", -1)
 
                 thead_elem = st.GetStructElementFromObject(thead.GetObject())
@@ -655,16 +655,21 @@ class Table:
                     print("⚠️ Failed to create <THead> or <TBody>")
                     return
 
-                print(f"🧩 Created <THead> and <TBody> with {len(tr_indices)} <TR> tags")
+                print(f"🧩 Created <THead> and <TBody> under <Table> with {len(tr_elems)} TRs")
 
                 # ✅ Move first TR into <THead>
-                first_tr_index = tr_indices[0]
-                # Add offset of +2 since <THead> and <TBody> are already added
-                adjusted_index = min(first_tr_index + 2, fresh_elem.GetNumChildren() - 1)
-                fresh_elem.MoveChild(adjusted_index, thead_elem, -1)
-                print("✅ Moved first <TR> to <THead>")
+                first_tr_obj = tr_elems[0].GetObject()
+                for i in range(fresh_elem.GetNumChildren()):
+                    if fresh_elem.GetChildType(i) != kPdsStructChildElement:
+                        continue
+                    obj = fresh_elem.GetChildObject(i)
+                    if obj.obj == first_tr_obj.obj:
+                        fresh_elem.MoveChild(i, thead_elem, -1)
+                        print("✅ Moved first <TR> into <THead>")
+                        break
 
                 # ✅ Move remaining TRs into <TBody>
+                moved_count = 0
                 while True:
                     moved = False
                     for i in range(fresh_elem.GetNumChildren()):
@@ -674,14 +679,15 @@ class Table:
                         child = st.GetStructElementFromObject(obj)
                         if child and child.GetType(False) == "TR":
                             fresh_elem.MoveChild(i, tbody_elem, -1)
+                            moved_count += 1
                             moved = True
                             break
                     if not moved:
                         break
 
-                print("✅ Remaining <TR> tags moved to <TBody>")
+                print(f"✅ Moved remaining {moved_count} <TR> tags into <TBody>")
 
-        # ✅ Recurse through children
+        # ✅ Recurse deeper
         for i in range(fresh_elem.GetNumChildren()):
             if fresh_elem.GetChildType(i) == kPdsStructChildElement:
                 obj = fresh_elem.GetChildObject(i)
@@ -755,6 +761,67 @@ class Table:
                     self.step19_move_tcredit_under_table(child_elem)
 
 
+    def step20_move_table_out_of_figure(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        """
+        Move <Table> from inside <_Figure_> up one level to become a sibling under <Story>.
+        """
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
+
+        # ✅ Process <Story> elements
+        if fresh_elem.GetType(False) == "Story":
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) != kPdsStructChildElement:
+                    continue
+
+                obj = fresh_elem.GetChildObject(i)
+                child = st.GetStructElementFromObject(obj)
+                if not child:
+                    continue
+
+                # Check for <_Figure_> inside <Story>
+                if child.GetType(False) == "_Figure_":
+                    figure_elem = child
+                    table_elem = None
+
+                    # Find <Table> inside <_Figure_>
+                    for j in range(figure_elem.GetNumChildren()):
+                        if figure_elem.GetChildType(j) != kPdsStructChildElement:
+                            continue
+                        obj2 = figure_elem.GetChildObject(j)
+                        sub_child = st.GetStructElementFromObject(obj2)
+                        if sub_child and sub_child.GetType(False) == "Table":
+                            table_elem = sub_child
+                            break
+
+                    # ✅ Move <Table> under <Story> (make sibling of <_Figure_>)
+                    if table_elem:
+                        print("🧩 Found <_Figure_> with <Table> inside — moving <Table> to <Story>")
+
+                        # Get stable references
+                        fresh_story = st.GetStructElementFromObject(fresh_elem.GetObject())
+                        fresh_table = st.GetStructElementFromObject(table_elem.GetObject())
+
+                        # Find <Table> index inside <_Figure_> and move it
+                        for k in range(figure_elem.GetNumChildren()):
+                            if figure_elem.GetChildType(k) != kPdsStructChildElement:
+                                continue
+                            obj3 = figure_elem.GetChildObject(k)
+                            if obj3.obj == table_elem.GetObject().obj:
+                                figure_elem.MoveChild(k, fresh_story, -1)
+                                print("✅ <Table> moved to <Story> successfully")
+                                break
+
+        # ✅ Continue recursion
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step20_move_table_out_of_figure(child_elem, fresh_elem)
+
 
 
     # def step17_split_multiple_lbody_in_li(self, elem: PdsStructElement):
@@ -772,8 +839,7 @@ class Table:
             if elem:
                 self.step18_fix_table_structure(elem)
                 self.step19_move_tcredit_under_table(elem)
-                # self.step15_wrap_p_into_li(elem)
-                # self.step16_rename_p_to_lbody_in_li(elem)
+                self.step20_move_table_out_of_figure(elem)
                 # self.step17_split_multiple_lbody_in_li(elem)
 
         if not doc.Save(output_path, kSaveFull):
