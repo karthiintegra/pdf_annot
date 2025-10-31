@@ -617,6 +617,173 @@ class Reference:
         print(f"✅ Phase 2 complete. Saved to: {output_path}")
 
 
+class Table:
+    """Handles Steps 14–30 (new operations)."""
+
+    def __init__(self, pdfix):
+        self.pdfix = pdfix
+
+    def step18_fix_table_structure(self, elem: PdsStructElement):
+        """Detect <Table> tags and restructure TRs into <THead> and <TBody>."""
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
+
+        # ✅ Process only <Table> elements
+        if fresh_elem.GetType(False) == "Table":
+            print("📊 Found <Table> — restructuring TRs into <THead> and <TBody>")
+
+            tr_indices = []
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh_elem.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child and child.GetType(False) == "TR":
+                        tr_indices.append(i)
+
+            # ✅ Only proceed if multiple TR tags exist
+            if len(tr_indices) > 1:
+                # Create <THead> and <TBody> under <Table>
+                thead = fresh_elem.AddNewChild("THead", 0)
+                tbody = fresh_elem.AddNewChild("TBody", -1)
+
+                thead_elem = st.GetStructElementFromObject(thead.GetObject())
+                tbody_elem = st.GetStructElementFromObject(tbody.GetObject())
+
+                if not thead_elem or not tbody_elem:
+                    print("⚠️ Failed to create <THead> or <TBody>")
+                    return
+
+                print(f"🧩 Created <THead> and <TBody> with {len(tr_indices)} <TR> tags")
+
+                # ✅ Move first TR into <THead>
+                first_tr_index = tr_indices[0]
+                # Add offset of +2 since <THead> and <TBody> are already added
+                adjusted_index = min(first_tr_index + 2, fresh_elem.GetNumChildren() - 1)
+                fresh_elem.MoveChild(adjusted_index, thead_elem, -1)
+                print("✅ Moved first <TR> to <THead>")
+
+                # ✅ Move remaining TRs into <TBody>
+                while True:
+                    moved = False
+                    for i in range(fresh_elem.GetNumChildren()):
+                        if fresh_elem.GetChildType(i) != kPdsStructChildElement:
+                            continue
+                        obj = fresh_elem.GetChildObject(i)
+                        child = st.GetStructElementFromObject(obj)
+                        if child and child.GetType(False) == "TR":
+                            fresh_elem.MoveChild(i, tbody_elem, -1)
+                            moved = True
+                            break
+                    if not moved:
+                        break
+
+                print("✅ Remaining <TR> tags moved to <TBody>")
+
+        # ✅ Recurse through children
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step18_fix_table_structure(child_elem)
+
+
+
+    def step19_move_tcredit_under_table(self, elem: PdsStructElement):
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
+
+        # ✅ Only process <Story> elements
+        if fresh_elem.GetType(False) == "Story":
+            figure_elem = None
+            tcredit_elem = None
+
+            # 1️⃣ Find <_Figure_> and <T_credit>
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) != kPdsStructChildElement:
+                    continue
+
+                obj = fresh_elem.GetChildObject(i)
+                child = st.GetStructElementFromObject(obj)
+                if not child:
+                    continue
+
+                tag = child.GetType(False)
+                if tag == "_Figure_":
+                    figure_elem = child
+                elif tag == "T_credit":
+                    tcredit_elem = child
+
+            # 2️⃣ If both are found
+            if figure_elem and tcredit_elem:
+                table_elem = None
+                for j in range(figure_elem.GetNumChildren()):
+                    if figure_elem.GetChildType(j) == kPdsStructChildElement:
+                        obj = figure_elem.GetChildObject(j)
+                        child = st.GetStructElementFromObject(obj)
+                        if child and child.GetType(False) == "Table":
+                            table_elem = child
+                            break
+
+                # 3️⃣ Move <T_credit> into <Table>
+                if table_elem:
+                    print("🧩 Found <Story> with <_Figure_> + <Table> + sibling <T_credit>")
+                    print("   Moving <T_credit> into <Table>...")
+
+                    fresh_story = st.GetStructElementFromObject(fresh_elem.GetObject())
+                    table_fresh = st.GetStructElementFromObject(table_elem.GetObject())
+
+                    for i in range(fresh_story.GetNumChildren()):
+                        if fresh_story.GetChildType(i) != kPdsStructChildElement:
+                            continue
+                        obj = fresh_story.GetChildObject(i)
+                        if obj.obj == tcredit_elem.GetObject().obj:
+                            fresh_story.MoveChild(i, table_fresh, -1)
+                            print("✅ <T_credit> moved inside <Table>")
+                            break
+
+        # 4️⃣ Recurse into child elements
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step19_move_tcredit_under_table(child_elem)
+
+
+
+
+    # def step17_split_multiple_lbody_in_li(self, elem: PdsStructElement):
+    #     pass
+    def modify_pdf_tags(self, input_path, output_path):
+        doc = self.pdfix.OpenDoc(input_path, "")
+        if not doc:
+            raise Exception("❌ Failed to open PDF")
+
+        st = doc.GetStructTree()
+        print("🚀 Starting Phase 2 transformations...")
+
+        for i in range(st.GetNumChildren()):
+            elem = st.GetStructElementFromObject(st.GetChildObject(i))
+            if elem:
+                self.step18_fix_table_structure(elem)
+                self.step19_move_tcredit_under_table(elem)
+                # self.step15_wrap_p_into_li(elem)
+                # self.step16_rename_p_to_lbody_in_li(elem)
+                # self.step17_split_multiple_lbody_in_li(elem)
+
+        if not doc.Save(output_path, kSaveFull):
+            raise Exception(f"❌ Failed to save: {self.pdfix.GetError()}")
+
+        doc.Close()
+        print(f"✅ Phase 2 complete. Saved to: {output_path}")
+
+
+
 # ============================================================
 # MAIN ENTRY POINT
 # ============================================================
@@ -635,4 +802,9 @@ if __name__ == "__main__":
     phase2.modify_pdf_tags(
         r"C:\Users\IS12765\Downloads\work_final\phase1_output.pdf",
         r"C:\Users\IS12765\Downloads\work_final\phase2_output.pdf"
+    )
+    transformer = Table(pdfix)
+    transformer.modify_pdf_tags(
+        r"C:\Users\IS12765\Downloads\work_final\phase2_output.pdf",
+        r"C:\Users\IS12765\Downloads\work_final\phase3_output.pdf"
     )
