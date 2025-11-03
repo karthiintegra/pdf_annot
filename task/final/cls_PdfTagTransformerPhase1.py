@@ -900,8 +900,110 @@ class Table:
         for i in range(elem.GetNumChildren()):
             if elem.GetChildType(i) == kPdsStructChildElement:
                 self.step22_change_Figure_to_Caption(st.GetStructElementFromObject(elem.GetChildObject(i)))
-    # def step17_split_multiple_lbody_in_li(self, elem: PdsStructElement):
-    #     pass
+
+    def step23_delete_story_if_only_table(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        """
+        Step 23️⃣ — If <Story> has only one child <Table>, remove <Story> and keep <Table> under its parent.
+        """
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
+
+        # Only process <Story> tags
+        if fresh_elem.GetType(False) == "Story" and parent:
+            child_elements = []
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh_elem.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child:
+                        child_elements.append(child)
+
+            # ✅ Check if Story has exactly 1 child, and that child is <Table>
+            if len(child_elements) == 1 and child_elements[0].GetType(False) == "Table":
+                print("🧩 <Story> has only <Table> — deleting <Story> and keeping <Table>")
+
+                # Get both Story and Table as fresh references
+                story_ref = fresh_elem
+                table_ref = child_elements[0]
+
+                # Find Story in its parent, then move Table out and delete Story
+                for i in range(parent.GetNumChildren()):
+                    if parent.GetChildType(i) != kPdsStructChildElement:
+                        continue
+
+                    obj = parent.GetChildObject(i)
+                    if obj.obj == story_ref.GetObject().obj:
+                        # Move <Table> into parent's child list (next position)
+                        story_ref.MoveChild(0, parent, i + 1)
+
+                        # Remove Story
+                        parent.RemoveChild(i)
+                        print("✅ <Table> successfully moved outside <Story>")
+                        return
+
+        # ✅ Recurse through the structure
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step23_delete_story_if_only_table(child_elem, fresh_elem)
+
+    def step24_move_table_before_heading(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # ✅ Process only <P> tags
+        if fresh.GetType(False) == "P":
+            table_index = None
+            for i in range(fresh.GetNumChildren()):
+                if fresh.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child and child.GetType(False) == "Table":
+                        table_index = i
+                        break
+
+            # ✅ Found <Table> inside <P>
+            if table_index is not None and parent:
+                p_index = None
+
+                # Find index of <P> in its parent
+                for i in range(parent.GetNumChildren()):
+                    if parent.GetChildObject(i).obj == fresh.GetObject().obj:
+                        p_index = i
+                        break
+
+                # ✅ Ensure <P> has previous sibling
+                if p_index is not None and p_index > 0:
+                    prev_obj = parent.GetChildObject(p_index - 1)
+                    prev_elem = st.GetStructElementFromObject(prev_obj)
+
+                    # ✅ If previous sibling is heading → move table
+                    if prev_elem and prev_elem.GetType(False) in ["H1", "H2", "H3", "H4", "H5", "H6"]:
+                        print("📦 Moving <Table> above heading...")
+
+                        # Refresh objects before modifying structure
+                        fresh_p = st.GetStructElementFromObject(fresh.GetObject())
+                        fresh_parent = st.GetStructElementFromObject(parent.GetObject())
+                        table_elem = st.GetStructElementFromObject(fresh_p.GetChildObject(table_index))
+
+                        # ✅ Move table to parent at new position
+                        fresh_p.MoveChild(table_index, fresh_parent, p_index - 1)
+
+                        print("✅ <Table> moved successfully!")
+
+        # ✅ Recursively continue
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step24_move_table_before_heading(child, fresh)
+
     def modify_pdf_tags(self, input_path, output_path):
         doc = self.pdfix.OpenDoc(input_path, "")
         if not doc:
@@ -918,6 +1020,8 @@ class Table:
                 self.step20_move_table_out_of_figure(elem)
                 self.step21_move_figure_into_table(elem)
                 self.step22_change_Figure_to_Caption(elem)
+                self.step23_delete_story_if_only_table(elem)
+                self.step24_move_table_before_heading(elem)
 
 
         if not doc.Save(output_path, kSaveFull):
@@ -926,7 +1030,173 @@ class Table:
         doc.Close()
         print(f"✅ Phase 2 complete. Saved to: {output_path}")
 
+class footprint:
+    def __init__(self, pdfix):
+        self.pdfix = pdfix
 
+    def step25_delete_story_if_only_lb1l(self, elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh_elem = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh_elem:
+            return
+
+        # Only process <Story> tags
+        if fresh_elem.GetType(False) == "Story" and parent:
+            child_elements = []
+            for i in range(fresh_elem.GetNumChildren()):
+                if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh_elem.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child:
+                        child_elements.append(child)
+
+            # ✅ Check if Story has exactly 1 child, and that child is <lb1l>
+            if len(child_elements) == 1 and child_elements[0].GetType(False) == "lb1l":
+                print("🧩 <Story> has only <lb1l> — deleting <Story> and keeping <lb1l>")
+
+                # Get both Story and lb1l as fresh references
+                story_ref = fresh_elem
+                lb1l_ref = child_elements[0]
+
+                # Find Story in its parent, then move lb1l out and delete Story
+                for i in range(parent.GetNumChildren()):
+                    if parent.GetChildType(i) != kPdsStructChildElement:
+                        continue
+
+                    obj = parent.GetChildObject(i)
+                    if obj.obj == story_ref.GetObject().obj:
+                        # Move <lb1l> into parent's child list (next position)
+                        story_ref.MoveChild(0, parent, i + 1)
+
+                        # Remove Story
+                        parent.RemoveChild(i)
+                        print("✅ <lb1l> successfully moved outside <Story>")
+                        return
+
+        # ✅ Recurse through the structure
+        for i in range(fresh_elem.GetNumChildren()):
+            if fresh_elem.GetChildType(i) == kPdsStructChildElement:
+                obj = fresh_elem.GetChildObject(i)
+                child_elem = st.GetStructElementFromObject(obj)
+                if child_elem:
+                    self.step25_delete_story_if_only_lb1l(child_elem, fresh_elem)
+
+    def step26_unwrap_lb1l_from_p(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # Process only <P> tags
+        if fresh.GetType(False) == "P" and parent:
+            if fresh.GetNumChildren() > 0 and fresh.GetChildType(0) == kPdsStructChildElement:
+                first_obj = fresh.GetChildObject(0)
+                first_child = st.GetStructElementFromObject(first_obj)
+
+                if first_child and first_child.GetType(False) == "lb1l":
+                    print("🔍 Found <lb1l> inside <P> — moving it ABOVE <P>...")
+
+                    fresh_p = st.GetStructElementFromObject(fresh.GetObject())
+                    fresh_parent = st.GetStructElementFromObject(parent.GetObject())
+                    lb1l_elem = st.GetStructElementFromObject(first_child.GetObject())
+
+                    # Find <P> index inside its parent
+                    p_index = None
+                    for i in range(fresh_parent.GetNumChildren()):
+                        if fresh_parent.GetChildObject(i).obj == fresh_p.GetObject().obj:
+                            p_index = i
+                            break
+
+                    if p_index is not None:
+                        # ✅ Move <lb1l> ABOVE <P> (index stays same → inserted before)
+                        fresh_p.MoveChild(0, fresh_parent, p_index)
+                        print("✅ <lb1l> moved ABOVE <P> successfully!")
+
+        # Continue recursion
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step26_unwrap_lb1l_from_p(child, fresh)
+
+    def step27_remove_lb1l_if_only_figure(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # Process only lb1l tags
+        if fresh.GetType(False) == "lb1l" and parent:
+            num_kids = fresh.GetNumChildren()
+            figure_child = None
+
+            # ✅ Check if exactly 1 child and it's <Figure>
+            if num_kids == 1 and fresh.GetChildType(0) == kPdsStructChildElement:
+                obj = fresh.GetChildObject(0)
+                child = st.GetStructElementFromObject(obj)
+
+                if child and child.GetType(False) == "Figure":
+                    figure_child = child
+
+            if figure_child:
+                print("🗑️ Removing <lb1l> wrapper — moving <Figure> to parent...")
+
+                # Refresh references before modification
+                fresh_lb1l = st.GetStructElementFromObject(fresh.GetObject())
+                fresh_parent = st.GetStructElementFromObject(parent.GetObject())
+                fresh_figure = st.GetStructElementFromObject(figure_child.GetObject())
+
+                # ✅ Find index of lb1l inside parent
+                lb1l_index = None
+                for i in range(fresh_parent.GetNumChildren()):
+                    if fresh_parent.GetChildObject(i).obj == fresh_lb1l.GetObject().obj:
+                        lb1l_index = i
+                        break
+
+                if lb1l_index is not None:
+                    # ✅ Move <Figure> to same position where <lb1l> existed
+                    fresh_lb1l.MoveChild(0, fresh_parent, lb1l_index)
+                    # ✅ Remove <lb1l>
+                    fresh_parent.RemoveChild(lb1l_index + 1)
+
+                    print("✅ <lb1l> removed and <Figure> lifted to parent")
+
+        # Continue recursion
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step27_remove_lb1l_if_only_figure(child, fresh)
+
+
+
+    def modify_pdf_tags(self, input_path, output_path):
+        doc = self.pdfix.OpenDoc(input_path, "")
+        if not doc:
+            raise Exception("❌ Failed to open PDF")
+
+        st = doc.GetStructTree()
+        print("🚀 Starting Phase 2 transformations...")
+
+        for i in range(st.GetNumChildren()):
+            elem = st.GetStructElementFromObject(st.GetChildObject(i))
+            if elem:
+                self.step25_delete_story_if_only_lb1l(elem)
+                self.step26_unwrap_lb1l_from_p(elem)
+                self.step27_remove_lb1l_if_only_figure(elem)
+                
+                # self.step20_move_table_out_of_figure(elem)
+                # self.step21_move_figure_into_table(elem)
+                # self.step22_change_Figure_to_Caption(elem)
+                # self.step23_delete_story_if_only_table(elem)
+                # self.step24_move_table_before_heading(elem)
+
+
+        if not doc.Save(output_path, kSaveFull):
+            raise Exception(f"❌ Failed to save: {self.pdfix.GetError()}")
+
+        doc.Close()
+        print(f"✅ Phase 2 complete. Saved to: {output_path}")
 
 # ============================================================
 # MAIN ENTRY POINT
@@ -947,8 +1217,14 @@ if __name__ == "__main__":
         r"C:\Users\IS12765\Downloads\work_final\phase1_output.pdf",
         r"C:\Users\IS12765\Downloads\work_final\phase2_output.pdf"
     )
-    transformer = Table(pdfix)
-    transformer.modify_pdf_tags(
+    phase3 = Table(pdfix)
+    phase3.modify_pdf_tags(
         r"C:\Users\IS12765\Downloads\work_final\phase2_output.pdf",
         r"C:\Users\IS12765\Downloads\work_final\phase3_output.pdf"
+    )
+
+    phase4 = footprint(pdfix)
+    phase3.modify_pdf_tags(
+        r"C:\Users\IS12765\Downloads\work_final\phase3_output.pdf",
+        r"C:\Users\IS12765\Downloads\work_final\phase4_output.pdf"
     )
