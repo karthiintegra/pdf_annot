@@ -377,7 +377,8 @@ class PdfTagTransformerPhase1:
         self.delete_tags_in_pdf(doc, "Article")
         self.delete_tags_in_pdf(doc, "_No_paragraph_style_")
         self.delete_tags_in_pdf(doc, "Eq_num")
-
+        self.delete_tags_in_pdf(doc, "T_col_hd")
+        self.delete_tags_in_pdf(doc, "T_body")
         if not doc.Save(output_path, kSaveFull):
             raise Exception(f"❌ Failed to save PDF: {self.pdfix.GetError()}")
 
@@ -1168,7 +1169,29 @@ class footprint:
                 if child:
                     self.step27_remove_lb1l_if_only_figure(child, fresh)
 
+    def step28_rename_double_figure_to_caption(self, elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
 
+        # ✅ Only rename __Figure__ when its parent is <Figure>
+        if parent is not None:
+            parent_type = parent.GetType(False)
+            elem_type = fresh.GetType(False)
+
+            if elem_type == "__Figure__" and parent_type == "Figure":
+                print("✏️ Renaming <__Figure__> → <Caption> under <Figure>")
+
+                fresh.SetType("Caption")
+                print("✅ Renamed successfully")
+
+        # Recursively continue
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step28_rename_double_figure_to_caption(child, fresh)
 
     def modify_pdf_tags(self, input_path, output_path):
         doc = self.pdfix.OpenDoc(input_path, "")
@@ -1184,8 +1207,7 @@ class footprint:
                 self.step25_delete_story_if_only_lb1l(elem)
                 self.step26_unwrap_lb1l_from_p(elem)
                 self.step27_remove_lb1l_if_only_figure(elem)
-                
-                # self.step20_move_table_out_of_figure(elem)
+                self.step28_rename_double_figure_to_caption(elem)
                 # self.step21_move_figure_into_table(elem)
                 # self.step22_change_Figure_to_Caption(elem)
                 # self.step23_delete_story_if_only_table(elem)
@@ -1224,7 +1246,7 @@ if __name__ == "__main__":
     )
 
     phase4 = footprint(pdfix)
-    phase3.modify_pdf_tags(
+    phase4.modify_pdf_tags(
         r"C:\Users\IS12765\Downloads\work_final\phase3_output.pdf",
         r"C:\Users\IS12765\Downloads\work_final\phase4_output.pdf"
     )
