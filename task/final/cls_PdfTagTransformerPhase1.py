@@ -1193,6 +1193,78 @@ class footprint:
                 if child:
                     self.step28_rename_double_figure_to_caption(child, fresh)
 
+    def step29_remove_p_inside_caption(self,elem: PdsStructElement):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # ✅ Process only <Caption> elements
+        if fresh.GetType(False) == "Caption":
+            if fresh.GetNumChildren() == 1:
+                if fresh.GetChildType(0) == kPdsStructChildElement:
+                    child = st.GetStructElementFromObject(fresh.GetChildObject(0))
+
+                    if child and child.GetType(False) == "P":
+                        print("🗑️ Removing <P> under <Caption> and keeping its children...")
+
+                        # Move all children of <P> into <Caption>
+                        num_kids = child.GetNumChildren()
+                        for _ in range(num_kids):
+                            child.MoveChild(0, fresh, -1)
+
+                        # Remove <P>
+                        fresh.RemoveChild(0)
+                        print("✅ <P> removed successfully")
+
+        # 🔁 Continue recursion
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step29_remove_p_inside_caption(child)
+
+    def step30_wrap_tfoot_content(self,elem: PdsStructElement):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # ✅ Process only TFoot elements
+        if fresh.GetType(False) == "TFoot":
+            print("🔍 Checking <TFoot> structure...")
+
+            has_tr = any(
+                fresh.GetChildType(i) == kPdsStructChildElement and
+                st.GetStructElementFromObject(fresh.GetChildObject(i)).GetType(False) == "TR"
+                for i in range(fresh.GetNumChildren())
+            )
+
+            # Skip if TR already present
+            if not has_tr and fresh.GetNumChildren() > 0:
+                print("🧩 Wrapping content inside <TFoot> into <TR><TD>...")
+
+                # Step 1: Create <TR> and <TD>
+                tr_elem = fresh.AddNewChild("TR", -1)
+                tr_struct = st.GetStructElementFromObject(tr_elem.GetObject())
+                td_elem = tr_struct.AddNewChild("TD", -1)
+                td_struct = st.GetStructElementFromObject(td_elem.GetObject())
+
+                # Step 2: Move all children under <TD>
+                num_kids = fresh.GetNumChildren()
+                for _ in range(num_kids - 1):  # TR is last, so skip it
+                    fresh.MoveChild(0, td_struct, -1)
+
+                print("✅ Successfully wrapped TFoot content into <TR><TD>")
+
+        # 🔁 Recursively process children
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step30_wrap_tfoot_content(child)
+
+
     def modify_pdf_tags(self, input_path, output_path):
         doc = self.pdfix.OpenDoc(input_path, "")
         if not doc:
@@ -1208,8 +1280,8 @@ class footprint:
                 self.step26_unwrap_lb1l_from_p(elem)
                 self.step27_remove_lb1l_if_only_figure(elem)
                 self.step28_rename_double_figure_to_caption(elem)
-                # self.step21_move_figure_into_table(elem)
-                # self.step22_change_Figure_to_Caption(elem)
+                self.step29_remove_p_inside_caption(elem)
+                self.step30_wrap_tfoot_content(elem)
                 # self.step23_delete_story_if_only_table(elem)
                 # self.step24_move_table_before_heading(elem)
 
