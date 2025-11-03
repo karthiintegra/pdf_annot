@@ -1264,6 +1264,89 @@ class footprint:
                 if child:
                     self.step30_wrap_tfoot_content(child)
 
+    def step31_delete_sect_with_normalparagraphstyle(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # ✅ Only process <Sect> that has a parent
+        if fresh.GetType(False) == "Sect" and parent:
+
+            # Collect REAL element children (ignore text/whitespace nodes)
+            real_children = []
+            for i in range(fresh.GetNumChildren()):
+                if fresh.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child:
+                        real_children.append(child)
+
+            # ✅ Check if it has **one real child** and that child is <NormalParagraphStyle>
+            if len(real_children) == 1 and real_children[0].GetType(False) == "NormalParagraphStyle":
+                print("🗑️ Deleting <Sect> that only wraps <NormalParagraphStyle>...")
+
+                sect_index = None
+                for i in range(parent.GetNumChildren()):
+                    if parent.GetChildType(i) == kPdsStructChildElement:
+                        obj = parent.GetChildObject(i)
+                        if obj.obj == fresh.GetObject().obj:
+                            sect_index = i
+                            break
+
+                if sect_index is not None:
+                    parent.RemoveChild(sect_index)
+                    print("✅ <Sect> + <NormalParagraphStyle> removed")
+                    return
+
+        # 🔁 Continue recursion
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step31_delete_sect_with_normalparagraphstyle(child, fresh)
+
+    def step32_delete_sect_with_normalparagraphstyle(self,elem: PdsStructElement, parent: PdsStructElement = None):
+        st = elem.GetStructTree()
+        fresh = st.GetStructElementFromObject(elem.GetObject())
+        if not fresh:
+            return
+
+        # ✅ Only process <Sect> that has a parent
+        if fresh.GetType(False) == "Sect" and parent:
+
+            # Collect REAL element children (ignore text/whitespace nodes)
+            real_children = []
+            for i in range(fresh.GetNumChildren()):
+                if fresh.GetChildType(i) == kPdsStructChildElement:
+                    obj = fresh.GetChildObject(i)
+                    child = st.GetStructElementFromObject(obj)
+                    if child:
+                        real_children.append(child)
+
+            # ✅ Check if it has **one real child** and that child is <NormalParagraphStyle>
+            if len(real_children) == 1 and real_children[0].GetType(False) == "NormalParagraphStyle":
+                print("🗑️ Deleting <Sect> that only wraps <NormalParagraphStyle>...")
+
+                sect_index = None
+                for i in range(parent.GetNumChildren()):
+                    if parent.GetChildType(i) == kPdsStructChildElement:
+                        obj = parent.GetChildObject(i)
+                        if obj.obj == fresh.GetObject().obj:
+                            sect_index = i
+                            break
+
+                if sect_index is not None:
+                    parent.RemoveChild(sect_index)
+                    print("✅ <Sect> + <NormalParagraphStyle> removed")
+                    return
+
+        # 🔁 Continue recursion
+        for i in range(fresh.GetNumChildren()):
+            if fresh.GetChildType(i) == kPdsStructChildElement:
+                child = st.GetStructElementFromObject(fresh.GetChildObject(i))
+                if child:
+                    self.step32_delete_sect_with_normalparagraphstyle(child, fresh)
 
     def modify_pdf_tags(self, input_path, output_path):
         doc = self.pdfix.OpenDoc(input_path, "")
@@ -1282,8 +1365,8 @@ class footprint:
                 self.step28_rename_double_figure_to_caption(elem)
                 self.step29_remove_p_inside_caption(elem)
                 self.step30_wrap_tfoot_content(elem)
-                # self.step23_delete_story_if_only_table(elem)
-                # self.step24_move_table_before_heading(elem)
+                self.step31_delete_sect_with_normalparagraphstyle(elem)
+                self.step32_delete_sect_with_normalparagraphstyle(elem)
 
 
         if not doc.Save(output_path, kSaveFull):
