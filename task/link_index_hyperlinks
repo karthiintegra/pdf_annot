@@ -1,0 +1,221 @@
+from pdfixsdk import *
+import re
+
+pdfix = GetPdfix()
+
+
+class Demo:
+    def __init__(self, pdfix):
+        self.pdfix = pdfix
+        if not pdfix:
+            raise Exception("❌ Pdfix initialization failed")
+
+        # 👉 Physical PDF page range (1-based numbering) where TOC / index lives
+        self.START_PAGE_NUM = 271   # inclusive
+        self.END_PAGE_NUM = 279     # inclusive
+
+        # Convert to 0-based indexes for Pdfix
+        self.START_PAGE_IDX = self.START_PAGE_NUM - 1
+        self.END_PAGE_IDX = self.END_PAGE_NUM - 1
+
+        # Will hold mappings like: { "1": 1, "2": 2, ..., "200": 200 }
+        self.chapter_links = {}
+
+    # ------------------------------------------------------------------
+    # 1) TEXT SEARCH ON PAGE - find bounding boxes for given text
+    # ------------------------------------------------------------------
+    def search_text_in_page(self, page, search_text):
+        """
+        Search for specific text in a page and return precise bounding boxes
+        for only the matched substring, not the entire line.
+        Uses whole-number matching (regex word boundaries) to avoid
+        matching '2' inside '72', '12', etc.
+        """
+        text_rects = []
+        try:
+            content = page.GetContent()
+            if content is None:
+                return text_rects
+
+            num_objects = content.GetNumObjects()
+            for i in range(num_objects):
+                obj = content.GetObject(i)
+                if obj is None:
+                    continue
+
+                if obj.GetObjectType() == kPdsPageText:
+                    text_obj = PdsText(obj.obj)
+                    full_text = text_obj.GetText()
+
+                    # Use regex with word boundaries so "2" does NOT match "72"
+                    pattern = r"\b" + re.escape(search_text) + r"\b"
+                    for m in re.finditer(pattern, full_text):
+                        match_start = m.start()
+                        match_end = m.end()
+                        merged_rect = None
+
+                        for char_idx in range(match_start, match_end):
+                            char_bbox = text_obj.GetCharBBox(char_idx)
+                            if char_bbox is not None:
+                                if merged_rect is None:
+                                    merged_rect = PdfRect()
+                                    merged_rect.left = char_bbox.left
+                                    merged_rect.right = char_bbox.right
+                                    merged_rect.top = char_bbox.top
+                                    merged_rect.bottom = char_bbox.bottom
+                                else:
+                                    merged_rect.left = min(merged_rect.left, char_bbox.left)
+                                    merged_rect.bottom = min(merged_rect.bottom, char_bbox.bottom)
+                                    merged_rect.right = max(merged_rect.right, char_bbox.right)
+                                    merged_rect.top = max(merged_rect.top, char_bbox.top)
+
+                        if merged_rect is not None:
+                            text_rects.append(merged_rect)
+
+            return text_rects
+
+        except Exception as e:
+            print(f"⚠️ Error searching text: {str(e)}")
+            return text_rects
+
+    # ------------------------------------------------------------------
+    # 2) ADD LINK ANNOTATION
+    # ------------------------------------------------------------------
+    def add_link_to_page(self, page, doc, rect, target_page_idx):
+        """
+        Add a clickable link annotation with no visible border or highlight.
+        target_page_idx is 0-based.
+        """
+        try:
+            # Debug:
+            print(f"      [DEBUG] Creating link to physical page index {target_page_idx} (1-based {target_page_idx + 1})")
+
+            link_annot = page.CreateAnnot(kAnnotLink, rect)
+            if link_annot is None:
+                return False
+
+            # Create destination
+            dest_rect = PdfRect()
+            view_dest = doc.CreateViewDestination(target_page_idx, kPdfZoomFitPage, dest_rect, 1.0)
+            if view_dest is None:
+                return False
+
+            action = doc.GetActionFromViewDest(view_dest)
+            if action is None:
+                return False
+
+            link_annot_obj = PdfLinkAnnot(link_annot.obj)
+            if not link_annot_obj.SetAction(action):
+                return False
+
+            # ✅ Make the link invisible
+            annot_obj = link_annot.GetObject()
+
+            # Remove border (Border [0 0 0])
+            border_array = doc.CreateArrayObject(True)
+            border_array.PutNumber(0, 0)
+            border_array.PutNumber(1, 0)
+            border_array.PutNumber(2, 0)
+            annot_obj.Put("Border", border_array)
+
+            # Remove color (C [])
+            color_array = doc.CreateArrayObject(True)
+            annot_obj.Put("C", color_array)
+
+            # No highlight
+            annot_obj.PutName("H", "N")
+
+            # Optional: make it printable
+            link_annot.SetFlags(kAnnotFlagPrint)
+
+            # Add annotation to the page
+            if not page.AddAnnot(-1, link_annot):
+                return False
+
+            return True
+
+        except Exception as e:
+            print(f"⚠️ Error adding link: {str(e)}")
+            return False
+
+    # ------------------------------------------------------------------
+    # 3) MAIN LOGIC: build 1–200 map, then add links on pages 271–279
+    # ------------------------------------------------------------------
+    def modify_pdf_tags(self, input_path, output_path):
+        doc = self.pdfix.OpenDoc(input_path, "")
+        if not doc:
+            raise Exception("❌ Failed to open PDF")
+
+        total_pages = doc.GetNumPages()
+        print(f"📄 Document has {total_pages} pages.")
+
+        print(f"🚀 Creating links from TOC pages {self.START_PAGE_NUM}–{self.END_PAGE_NUM} for numbers 1–200")
+
+        # 3.1 Build chapter_links = {"1":1, "2":2, ..., "200":200}
+        max_target = min(279, total_pages)  # don't exceed real page count
+        self.chapter_links = {str(i): i for i in range(1, max_target + 1)}
+
+        print("\n📚 Initial chapter_links (1..max_target):")
+        for k, v in list(self.chapter_links.items())[:30]:  # show first 30
+            print(f'   "{k}": {v}')
+        if max_target > 30:
+            print(f"   ... up to \"{max_target}\": {max_target}")
+
+        # Sort by ascending page number
+        sorted_chapters = sorted(self.chapter_links.items(), key=lambda x: x[1])
+
+        print("\n📚 Sorted chapter_links (ascending order):")
+        for k, v in sorted_chapters[:30]:
+            print(f'   "{k}": {v}')
+        if max_target > 30:
+            print(f"   ... up to \"{max_target}\": {max_target}")
+
+        # 3.2 Add hyperlinks on pages 271–279 using sorted mappings
+        for chapter_text, target_page in sorted_chapters:
+            target_page_idx = target_page - 1  # convert to 0-based index
+
+            if target_page_idx < 0 or target_page_idx >= total_pages:
+                print(f"   ⚠️ Target page {target_page} for '{chapter_text}' is out of range.")
+                continue
+
+            print(f"\n🔗 Creating links for number '{chapter_text}' → page {target_page} (index {target_page_idx})")
+
+            # Only scan TOC/index pages 271–279 for the clickable number text
+            for page_idx in range(self.START_PAGE_IDX, self.END_PAGE_IDX + 1):
+                if page_idx < 0 or page_idx >= total_pages:
+                    continue
+
+                page = doc.AcquirePage(page_idx)
+                if page is None:
+                    continue
+
+                rects = self.search_text_in_page(page, chapter_text)
+                links_added = 0
+
+                for rect in rects:
+                    if self.add_link_to_page(page, doc, rect, target_page_idx):
+                        links_added += 1
+
+                page.Release()
+
+                if links_added > 0:
+                    print(f"   ✅ Page {page_idx + 1}: added {links_added} link(s) for '{chapter_text}'")
+
+        # 3.3 Save updated PDF
+        print("\n💾 Saving PDF...")
+        if not doc.Save(output_path, kSaveFull):
+            err = self.pdfix.GetError()
+            doc.Close()
+            raise Exception(f"❌ Failed to save: {err}")
+
+        doc.Close()
+        print(f"✅ Link creation complete. Saved to: {output_path}")
+
+
+if __name__ == "__main__":
+    pdfix = GetPdfix()
+    phase1 = Demo(pdfix)
+    phase1.modify_pdf_tags(
+        r"C:\Users\IS12765\Desktop\output.pdf",
+        r"C:\Users\IS12765\Downloads\fixed1.pdf"
+    )
